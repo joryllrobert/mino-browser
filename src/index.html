@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Mino Browser</title>
+<style>
+:root { color-scheme: light; }
+[hidden] { display: none !important; }
+/* Layout: a browser window card filling the page; lock screen overlays it. Chrome-like neutrals, one blue accent. */
+:root {
+  --page: #e8eaed;
+  --strip: #dee1e6;
+  --toolbar: #ffffff;
+  --omni: #f1f3f4;
+  --omni-focus: #ffffff;
+  --fg: #202124;
+  --muted: #5f6368;
+  --hover: rgba(60, 64, 67, 0.1);
+  --border: #dadce0;
+  --accent: #1a73e8;
+  --accent-fg: #ffffff;
+  --danger: #d93025;
+  --shadow: 0 4px 16px rgba(60, 64, 67, 0.28);
+  --font: system-ui, "Roboto", -apple-system, "Segoe UI", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #101114;
+    --strip: #202124;
+    --toolbar: #35363a;
+    --omni: #202124;
+    --omni-focus: #202124;
+    --fg: #e8eaed;
+    --muted: #9aa0a6;
+    --hover: rgba(232, 234, 237, 0.12);
+    --border: #4a4c50;
+    --accent: #8ab4f8;
+    --accent-fg: #202124;
+    --danger: #f28b82;
+    --shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #101114;
+  --strip: #202124;
+  --toolbar: #35363a;
+  --omni: #202124;
+  --omni-focus: #202124;
+  --fg: #e8eaed;
+  --muted: #9aa0a6;
+  --hover: rgba(232, 234, 237, 0.12);
+  --border: #4a4c50;
+  --accent: #8ab4f8;
+  --accent-fg: #202124;
+  --danger: #f28b82;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--fg);
+  font: 14px/1.4 var(--font);
+  margin: 0;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+input { font: inherit; color: inherit; }
+svg { display: block; fill: currentColor; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--toolbar);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Tab strip */
+#strip { display: flex; align-items: flex-end; gap: 2px; background: var(--strip); padding: 8px 0 0 8px; height: 42px; flex: none; -webkit-app-region: drag; user-select: none; }
+#tabs { display: flex; align-items: flex-end; gap: 0; min-width: 0; flex: 0 1 auto; max-width: calc(100% - 44px - 118px); -webkit-app-region: no-drag; }
+.tab {
+  position: relative; display: flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 8px 0 12px; min-width: 40px; max-width: 240px; flex: 1 1 200px;
+  border-radius: 8px 8px 0 0; color: var(--muted); cursor: default; user-select: none;
+}
+.tab:hover { background: var(--hover); }
+.tab.active { background: var(--toolbar); color: var(--fg); }
+.tab.active::before, .tab.active::after {
+  content: ""; position: absolute; bottom: 0; width: 8px; height: 8px; background: transparent;
+}
+.tab.active::before { left: -8px; border-bottom-right-radius: 8px; box-shadow: 4px 4px 0 4px var(--toolbar); }
+.tab.active::after { right: -8px; border-bottom-left-radius: 8px; box-shadow: -4px 4px 0 4px var(--toolbar); }
+.tab:not(.active) + .tab:not(.active)::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: var(--border); }
+.tab .ttl { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; }
+.fav { flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 500; color: #fff; }
+.fav.blank { background: transparent; color: var(--muted); }
+.tab .x { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.tab .x:hover { background: var(--hover); }
+.icon-btn { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.icon-btn:hover:not(:disabled) { background: var(--hover); }
+.icon-btn:disabled { opacity: 0.38; cursor: default; }
+#newtab { align-self: center; margin-bottom: 4px; width: 28px; height: 28px; -webkit-app-region: no-drag; }
+#dragfill { flex: 1; min-width: 24px; align-self: stretch; }
+#wc { display: flex; align-items: center; gap: 2px; align-self: center; margin: 0 8px 0 auto; -webkit-app-region: no-drag; }
+#wc button { width: 32px; height: 30px; border-radius: 15px; display: grid; place-items: center; color: var(--fg); }
+#wc button:hover { background: var(--hover); }
+#wc button#wclose:hover { background: #e81123; color: #fff; }
+#wc svg { width: 9px; height: 9px; fill: none; stroke: currentColor; stroke-width: 1; }
+#wc #wrestore { display: none; }
+html.maximized #wc #wmax { display: none; }
+html.maximized #wc #wrestore { display: grid; }
+html:not(.maximized) #app { border: 1px solid var(--border); }
+#app.locked #tabs, #app.locked #newtab { visibility: hidden; }
+
+/* Toolbar */
+#toolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--toolbar); position: relative; }
+#omni {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px 0 14px;
+  background: var(--omni); border-radius: 17px; border: 1px solid transparent;
+}
+#omni:focus-within { background: var(--omni-focus); border-color: var(--accent); }
+#url { flex: 1; min-width: 0; background: none; border: 0; outline: 0; height: 100%; font-size: 14px; }
+#url::placeholder { color: var(--muted); }
+#star.on { color: var(--accent); }
+#star .off { display: block; } #star .fill { display: none; }
+#star.on .off { display: none; } #star.on .fill { display: block; }
+
+/* Bookmarks bar */
+#bmbar { display: flex; align-items: center; gap: 2px; padding: 2px 8px 6px; background: var(--toolbar); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; min-height: 34px; }
+#bmbar::-webkit-scrollbar { display: none; }
+.bm { flex: none; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 13px; font-size: 12px; max-width: 160px; }
+.bm:hover { background: var(--hover); }
+.bm span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bm-empty { color: var(--muted); font-size: 12px; padding: 0 8px; }
+
+/* Notice */
+
+/* Viewport */
+#viewport { flex: 1; min-height: 0; position: relative; background: #fff; }
+#viewport webview { position: absolute; inset: 0; width: 100%; height: 100%; background: #fff; }
+#viewport webview[hidden] { display: none; }
+.fav img { width: 16px; height: 16px; border-radius: 3px; }
+#ntp { position: absolute; inset: 0; background: var(--toolbar); display: flex; flex-direction: column; align-items: center; padding: 12vh 20px 20px; gap: 28px; overflow: auto; }
+#ntp h1 { margin: 0; font-size: 28px; font-weight: 400; letter-spacing: -0.01em; color: var(--fg); text-wrap: balance; text-align: center; }
+#ntp h1 small { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); letter-spacing: 0; }
+#ntpform { width: min(560px, 100%); }
+#ntpq { width: 100%; height: 44px; border-radius: 22px; padding: 0 20px; border: 1px solid var(--border); background: var(--omni); outline: 0; }
+#ntpq:focus { background: var(--omni-focus); border-color: var(--accent); }
+#tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; width: min(560px, 100%); }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 6px; border-radius: 8px; font-size: 12px; min-width: 0; }
+.tile:hover { background: var(--hover); }
+.tile .fav { width: 40px; height: 40px; font-size: 18px; }
+.tile span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Popovers */
+.pop {
+  position: absolute; z-index: 20; background: var(--toolbar); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: var(--shadow); padding: 8px 0; min-width: 240px; max-width: calc(100% - 16px);
+}
+.pop h2 { margin: 0; padding: 8px 16px 4px; font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.pop .item { min-height: 36px; line-height: 20px; display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 16px; text-align: left; }
+.pop .item:hover { background: var(--hover); }
+.pop hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+.bmrow { display: flex; align-items: center; }
+.bmrow .item { flex: 1; min-width: 0; }
+.bmrow .item span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmrow .icon-btn { width: 28px; height: 28px; margin-right: 8px; }
+#menu { top: 46px; right: 8px; width: 320px; max-width: calc(100vw - 16px); max-height: calc(100vh - 100px); overflow-y: auto; }
+#bmpop { top: 46px; right: 48px; width: 300px; padding: 16px; }
+#bmpop h2 { padding: 0 0 12px; font-size: 16px; font-weight: 400; color: var(--fg); text-transform: none; letter-spacing: 0; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.field label { font-size: 12px; color: var(--muted); }
+.field input { height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--omni-focus); }
+.field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.row { display: flex; justify-content: flex-end; gap: 8px; }
+.btn { height: 34px; padding: 0 16px; border-radius: 17px; color: var(--accent); font-weight: 500; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--danger); }
+
+/* Lock screen */
+#lock { position: absolute; inset: 42px 0 0 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: var(--strip); }
+#lock[hidden] { display: none !important; }
+#lockcard { width: min(360px, 100%); background: var(--toolbar); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 32px 28px 24px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+#lockicon { width: 72px; height: 72px; margin-bottom: 8px; }
+#lockicon img { width: 100%; height: 100%; display: block; }
+#ntplogo { display: block; width: 72px; height: 72px; margin: 0 auto 14px; }
+#lockcard h1 { margin: 0; font-size: 22px; font-weight: 400; text-align: center; text-wrap: balance; }
+#lockcard p { margin: 0 0 12px; color: var(--muted); font-size: 13px; text-align: center; }
+#lockform { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+#lockform .field { margin: 0; }
+#lockerr { min-height: 18px; color: var(--danger); font-size: 12px; text-align: center; }
+#lockform .btn { height: 38px; width: 100%; border-radius: 19px; }
+#lockfoot { margin-top: 10px; font-size: 11px; color: var(--muted); text-align: center; max-width: 30ch; }
+
+/* Modal for password change */
+#modalwrap { position: absolute; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.4); display: grid; place-items: center; padding: 16px; }
+#modalwrap[hidden] { display: none !important; }
+#modal { width: min(360px, 100%); background: var(--toolbar); border-radius: 12px; box-shadow: var(--shadow); padding: 24px; }
+#modal h2 { margin: 0 0 16px; font-size: 18px; font-weight: 400; }
+#modalerr { min-height: 18px; color: var(--danger); font-size: 12px; margin-bottom: 8px; }
+
+#app.ovl #viewport webview { visibility: hidden; }
+#app.ovl #viewport { background: var(--omni); }
+.avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; color: #fff; font-weight: 500; font-size: 13px; display: grid; place-items: center; margin: 0 2px; }
+.avatar:hover { filter: brightness(1.12); }
+.menu-note { padding: 4px 16px 8px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+#profpop { top: 46px; right: 80px; width: 300px; max-width: calc(100vw - 96px); max-height: calc(100vh - 100px); overflow-y: auto; }
+#ctx { position: fixed; min-width: 190px; padding: 6px 0; z-index: 60; }
+.danger-text { color: var(--danger); }
+#gwrap { position: absolute; inset: 0; z-index: 45; background: rgba(0, 0, 0, 0.4); display: grid; place-items: center; padding: 16px; }
+#gwrap[hidden] { display: none !important; }
+#gform { width: min(400px, 100%); background: var(--toolbar); border-radius: 12px; box-shadow: var(--shadow); padding: 24px; }
+#gform h2 { margin: 0 0 12px; font-size: 18px; font-weight: 400; }
+#gmsg { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+#gerr { min-height: 18px; color: var(--danger); font-size: 12px; margin-bottom: 8px; }
+.btn.danger-fill { background: var(--danger); color: #fff; }
+@media (max-width: 520px) {
+  #fwd { display: none; }
+  #strip { padding-left: 4px; padding-right: 4px; }
+  .tab { padding-left: 8px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tab, .bm, .tile, .icon-btn { transition: background-color 0.12s; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="strip">
+    <div id="tabs" role="tablist" aria-label="Tabs"></div>
+    <button id="newtab" class="icon-btn" title="New tab" aria-label="New tab"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg></button>
+    <div id="dragfill"></div>
+    <div id="wc">
+      <button id="wmin" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 10 10"><path d="M0 5.5h10"/></svg></button>
+      <button id="wmax" title="Maximize" aria-label="Maximize"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
+      <button id="wrestore" title="Restore" aria-label="Restore"><svg viewBox="0 0 10 10"><path d="M2.5 2.5v-2h7v7h-2"/><rect x="0.5" y="2.5" width="7" height="7"/></svg></button>
+      <button id="wclose" title="Close" aria-label="Close"><svg viewBox="0 0 10 10"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/></svg></button>
+    </div>
+  </div>
+
+  <div id="toolbar">
+    <button id="back" class="icon-btn" title="Back" aria-label="Back"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg></button>
+    <button id="fwd" class="icon-btn" title="Forward" aria-label="Forward"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg></button>
+    <button id="reload" class="icon-btn" title="Reload" aria-label="Reload"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button>
+    <div id="omni">
+      <svg width="16" height="16" viewBox="0 0 24 24" style="color:var(--muted)"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input id="url" type="text" placeholder="Search or type a URL" aria-label="Address bar" autocomplete="off" spellcheck="false">
+      <button id="star" class="icon-btn" title="Bookmark this page" aria-label="Bookmark this page">
+        <svg class="off" width="20" height="20" viewBox="0 0 24 24"><path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"/></svg>
+        <svg class="fill" width="20" height="20" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+      </button>
+    </div>
+    <button id="profbtn" class="avatar" title="Profile" aria-label="Profiles" aria-haspopup="true">P</button>
+    <button id="lockbtn" class="icon-btn" title="Lock browser" aria-label="Lock browser"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9zm9 14H6V10h12zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg></button>
+    <button id="menubtn" class="icon-btn" title="Menu" aria-label="Menu" aria-haspopup="true"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg></button>
+
+    <div id="bmpop" class="pop" hidden role="dialog" aria-label="Edit bookmark">
+      <h2>Bookmark saved</h2>
+      <div class="field"><label for="bmname">Name</label><input id="bmname" type="text"></div>
+      <div class="row"><button id="bmremove" class="btn danger">Remove</button><button id="bmdone" class="btn primary">Done</button></div>
+    </div>
+    <div id="menu" class="pop" hidden role="menu"></div>
+    <div id="profpop" class="pop" hidden role="menu"></div>
+  </div>
+
+  <div id="bmbar" aria-label="Bookmarks bar"></div>
+
+  <div id="viewport">
+    <div id="ntp">
+      <h1><img id="ntplogo" src="logo.png" alt="">Mino Browser<small>Search or type a web address</small></h1>
+      <form id="ntpform"><input id="ntpq" type="text" placeholder="Search or type a URL" aria-label="Search or type a URL" autocomplete="off"></form>
+      <div id="tiles"></div>
+    </div>
+  </div>
+
+  <div id="ctx" class="pop" hidden role="menu"></div>
+
+  <div id="gwrap" hidden>
+    <form id="gform" autocomplete="off">
+      <h2 id="gtitle"></h2>
+      <p id="gmsg" hidden></p>
+      <div id="gfields"></div>
+      <div id="gerr" role="alert"></div>
+      <div class="row"><button type="button" id="gcancel" class="btn">Cancel</button><button type="submit" id="gok" class="btn primary">Save</button></div>
+    </form>
+  </div>
+
+  <div id="modalwrap" hidden>
+    <form id="modal" autocomplete="off">
+      <h2>Change password</h2>
+      <div class="field"><label for="pwold">Current password</label><input id="pwold" type="password" autocomplete="current-password"></div>
+      <div class="field"><label for="pwnew">New password</label><input id="pwnew" type="password" autocomplete="new-password"></div>
+      <div class="field"><label for="pwnew2">Confirm new password</label><input id="pwnew2" type="password" autocomplete="new-password"></div>
+      <div id="modalerr" role="alert"></div>
+      <div class="row"><button type="button" id="modalcancel" class="btn">Cancel</button><button type="submit" class="btn primary">Save</button></div>
+    </form>
+  </div>
+
+  <div id="lock">
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <div id="lockcard">
+        <div id="lockicon"><img src="logo.png" alt="Mino Browser"></div>
+        <h1 id="locktitle">Enter password</h1>
+        <p id="locksub">Your tabs and bookmarks are waiting.</p>
+        <form id="lockform" autocomplete="off">
+          <div class="field"><label for="lockpw" id="lockpwl">Password</label><input id="lockpw" type="password" autocomplete="current-password"></div>
+          <div class="field" id="confirmwrap" hidden><label for="lockpw2">Confirm password</label><input id="lockpw2" type="password" autocomplete="new-password"></div>
+          <div id="lockerr" role="alert"></div>
+          <button type="submit" id="locksubmit" class="btn primary">Unlock</button>
+        </form>
+      </div>
+      <div id="lockfoot">This password locks the screen in this browser tab. It is a privacy lock, not encryption.</div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body></html>

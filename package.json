@@ -1,0 +1,34 @@
+{
+  "name": "mino-browser",
+  "version": "0.3",
+  "description": "A simple Chrome-style web browser with bookmarks that opens behind a password.",
+  "main": "src/main.js",
+  "author": "Mino Browser <joryllrobert@me.org>",
+  "homepage": "https://me.org",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux AppImage deb",
+    "dist:appimage": "electron-builder --linux AppImage",
+    "dist:deb": "electron-builder --linux deb"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "org.joryllrobert.minobrowser",
+    "productName": "Mino Browser",
+    "files": ["src/**/*", "build/icon.png", "package.json"],
+    "artifactName": "mino-browser-${version}.${ext}",
+    "directories": { "output": "dist" },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Network;WebBrowser",
+      "maintainer": "Mino Browser <joryllrobert@me.org>",
+      "icon": "build/icon.png",
+      "synopsis": "Chrome-style browser behind a password",
+      "desktop": { "Keywords": "browser;web;bookmarks;", "StartupWMClass": "mino-browser" }
+    }
+  }
+}
