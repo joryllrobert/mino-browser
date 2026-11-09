@@ -478,6 +478,7 @@
     $("#fwd").disabled = t.i >= t.hist.length - 1;
     starBtn.classList.toggle("on", !isNew && findBm(cur) >= 0);
     starBtn.disabled = isNew;
+    if (api.navState) api.navState(t.i > 0, t.i < t.hist.length - 1);
   }
   function show() {
     tabs.forEach(function (t) { if (t.frame) t.frame.hidden = !(t.id === activeId && t.hist[t.i] !== "newtab"); });
@@ -498,13 +499,95 @@
   urlInput.addEventListener("blur", updateChrome);
   $("#ntpform").addEventListener("submit", function (e) { e.preventDefault(); var u = normalize($("#ntpq").value); if (u) { $("#ntpq").value = ""; navigate(u); } });
 
+  /* ---------- downloads ---------- */
+  var dlPop = $("#dlpop"), dlBtn = $("#dlbtn"), dls = {}, dlRows = {};
+  function fmtBytes(n) {
+    if (!(n > 0)) return "0 B";
+    var u = ["B", "KB", "MB", "GB", "TB"], i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+    var v = n / Math.pow(1024, i);
+    return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + " " + u[i];
+  }
+  function dlAct(id, a) { return function (e) { e.stopPropagation(); api.downloads.act(id, a); }; }
+  function mkRow(d) {
+    var ic = icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9z");
+    var r = { el: null };
+    r.name = h("div", { class: "dln" }); r.sub = h("div", { class: "dls" });
+    r.bar = h("div", { class: "dlbar" }, document.createElement("i")); r.fill = r.bar.firstChild;
+    r.bOpen = h("button", { class: "icon-btn", title: "Show in folder", "aria-label": "Show in folder", onclick: dlAct(d.id, "show") }, icon("M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8z"));
+    r.bPause = h("button", { class: "icon-btn", title: "Pause", "aria-label": "Pause", onclick: dlAct(d.id, "pause") }, icon("M6 19h4V5H6zm8-14v14h4V5z"));
+    r.bResume = h("button", { class: "icon-btn", title: "Resume", "aria-label": "Resume", onclick: dlAct(d.id, "resume") }, icon("M8 5v14l11-7z"));
+    r.bCancel = h("button", { class: "icon-btn", title: "Cancel", "aria-label": "Cancel", onclick: dlAct(d.id, "cancel") }, icon("M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"));
+    r.bRemove = h("button", { class: "icon-btn", title: "Remove from list", "aria-label": "Remove from list", onclick: dlAct(d.id, "remove") }, icon("M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"));
+    r.name.addEventListener("click", function () { if (r.name.classList.contains("link")) api.downloads.act(d.id, "open"); });
+    r.el = h("div", { class: "dlrow" }, h("div", { class: "dli" }, ic), h("div", { class: "dlm" }, r.name, r.bar, r.sub), h("div", { class: "dla" }, r.bOpen, r.bPause, r.bResume, r.bCancel, r.bRemove));
+    return r;
+  }
+  function fillRow(r, d) {
+    var done = d.state === "completed", live = d.state === "progressing", intr = d.state === "interrupted";
+    r.name.textContent = d.name;
+    r.name.title = d.url;
+    r.name.classList.toggle("link", done && d.exists);
+    r.name.classList.toggle("gone", done && !d.exists);
+    var st;
+    if (done) st = d.exists ? fmtBytes(d.total || d.received) + " · " + host(d.url) : "File moved or deleted";
+    else if (d.state === "cancelled") st = "Cancelled";
+    else if (intr) st = "Interrupted · " + fmtBytes(d.received) + (d.total ? " of " + fmtBytes(d.total) : "");
+    else st = (d.paused ? "Paused · " : "") + fmtBytes(d.received) + (d.total ? " of " + fmtBytes(d.total) : "") + " · " + host(d.url);
+    r.sub.textContent = st;
+    r.sub.classList.toggle("err", intr || (done && !d.exists));
+    r.bar.hidden = !(live || intr);
+    r.bar.classList.toggle("indet", !d.total);
+    r.fill.style.width = d.total ? Math.min(100, Math.round(d.received * 100 / d.total)) + "%" : "";
+    r.bOpen.hidden = !d.path || (done && !d.exists);
+    r.bPause.hidden = !(live && !d.paused);
+    r.bResume.hidden = !((live && d.paused) || (intr && d.resumable));
+    r.bCancel.hidden = !(live || intr);
+    r.bRemove.hidden = live;
+  }
+  function renderDl() {
+    dlPop.textContent = "";
+    var list = Object.keys(dls).map(function (k) { return dls[k]; }).sort(function (a, b) { return b.time - a.time; });
+    dlPop.appendChild(h("div", { class: "dlhead" }, h("h2", { text: "Downloads" }),
+      h("div", { style: "display:flex;gap:4px" },
+        h("button", { class: "btn", onclick: function (e) { e.stopPropagation(); api.downloads.act("", "folder-all"); } }, document.createTextNode("Open folder")),
+        h("button", { class: "btn", onclick: function (e) { e.stopPropagation(); api.downloads.act("", "clear"); } }, document.createTextNode("Clear all")))));
+    if (!list.length) { dlPop.appendChild(h("div", { class: "dlempty", text: "Files you download appear here." })); return; }
+    list.forEach(function (d) { if (!dlRows[d.id]) dlRows[d.id] = mkRow(d); fillRow(dlRows[d.id], d); dlPop.appendChild(dlRows[d.id].el); });
+  }
+  function dlBusy() { return Object.keys(dls).some(function (k) { return dls[k].state === "progressing"; }); }
+  function openDl() {
+    closePops();
+    api.downloads.list().then(function (items) {
+      dls = {}; dlRows = {}; items.forEach(function (d) { dls[d.id] = d; });
+      renderDl(); dlPop.hidden = false;
+    });
+  }
+  function toggleDl() { if (!dlPop.hidden) closePops(); else openDl(); }
+  dlBtn.addEventListener("click", function (e) { e.stopPropagation(); toggleDl(); });
+  dlPop.addEventListener("click", function (e) { e.stopPropagation(); });
+  if (api.downloads) {
+    api.downloads.onUpdate(function (items) {
+      var added = false, structural = false;
+      items.forEach(function (d) {
+        if (d.removed) { delete dls[d.id]; delete dlRows[d.id]; structural = true; return; }
+        if (!dls[d.id]) { added = true; structural = true; }
+        dls[d.id] = d;
+        if (dlRows[d.id]) fillRow(dlRows[d.id], d);
+      });
+      dlBtn.classList.toggle("busy", dlBusy());
+      if (added) { dlBtn.classList.add("flash"); setTimeout(function () { dlBtn.classList.remove("flash"); }, 2500); }
+      if (structural && !dlPop.hidden) renderDl();
+    });
+  }
+
   /* ---------- menu ---------- */
   var menu = $("#menu");
-  function closePops() { menu.hidden = true; bmPop.hidden = true; ctx.hidden = true; profPop.hidden = true; }
+  function closePops() { menu.hidden = true; bmPop.hidden = true; ctx.hidden = true; profPop.hidden = true; dlPop.hidden = true; }
   function icon(path) { var s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("width", "18"); s.setAttribute("height", "18"); s.innerHTML = '<path d="' + path + '"/>'; return s; }
   function buildMenu() {
     menu.textContent = "";
     menu.appendChild(h("button", { class: "item", role: "menuitem", onclick: function () { closePops(); newTab(); } }, icon("M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"), h("span", { text: "New tab" })));
+    menu.appendChild(h("button", { class: "item", role: "menuitem", onclick: function () { closePops(); openDl(); } }, icon("M19 9h-4V3H9v6H5l7 7zM5 18v2h14v-2z"), h("span", { text: "Downloads", style: "flex:1" }), h("span", { text: "Ctrl+J", style: "font-size:11px;color:var(--muted)" })));
     var at = active();
     if (at && at.hist[at.i] !== "newtab" && api.openExternal) {
       menu.appendChild(h("button", { class: "item", role: "menuitem", onclick: function () { closePops(); api.openExternal(at.hist[at.i]); } }, icon("M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z"), h("span", { text: "Open page in default browser" })));
@@ -567,7 +650,7 @@
   document.addEventListener("click", closePops);
   /* A <webview> always paints above normal page content, which hid the menus and the
      lock screen behind the page. Hide it while any popup, dialog or the lock screen is open. */
-  var ovlEls = [menu, bmPop, ctx, profPop, gwrap, $("#modalwrap"), lockEl];
+  var ovlEls = [menu, bmPop, ctx, profPop, dlPop, gwrap, $("#modalwrap"), lockEl];
   function syncOverlay() { $("#app").classList.toggle("ovl", ovlEls.some(function (el) { return !el.hidden; })); }
   var ovlObs = new MutationObserver(syncOverlay);
   ovlEls.forEach(function (el) { ovlObs.observe(el, { attributes: true, attributeFilter: ["hidden"] }); });
@@ -589,16 +672,25 @@
     });
   });
 
+  function doShortcut(name) {
+    if (!lockEl.hidden) return;
+    if (name === "newtab") newTab();
+    else if (name === "closetab") { var t = active(); if (t) closeTab(t.id); }
+    else if (name === "focusurl") urlInput.focus();
+    else if (name === "bookmark") starBtn.click();
+    else if (name === "reload") $("#reload").click();
+    else if (name === "downloads") toggleDl();
+    else if (name === "lock") showLock();
+  }
   document.addEventListener("keydown", function (e) {
-    if (!lockEl.hidden || !(e.ctrlKey || e.metaKey)) return;
+    if (!lockEl.hidden || !(e.ctrlKey || e.metaKey) || e.altKey) return;
     var k = e.key.toLowerCase();
-    if (k === "t") { e.preventDefault(); newTab(); }
-    else if (k === "w") { e.preventDefault(); var t = active(); if (t) closeTab(t.id); }
-    else if (k === "l") { e.preventDefault(); urlInput.focus(); }
-    else if (k === "d") { e.preventDefault(); starBtn.click(); }
-    else if (k === "r") { e.preventDefault(); $("#reload").click(); }
-    else if (e.shiftKey && k === "k") { e.preventDefault(); showLock(); }
+    var name = e.shiftKey ? (k === "k" ? "lock" : null) : { t: "newtab", w: "closetab", l: "focusurl", d: "bookmark", r: "reload", j: "downloads" }[k];
+    if (name) { e.preventDefault(); doShortcut(name); }
   });
+  if (api.onShortcut) api.onShortcut(doShortcut);
+  if (api.onNav) api.onNav(function (a) { if (!lockEl.hidden) return; $(a === "back" ? "#back" : a === "fwd" ? "#fwd" : "#reload").click(); });
+  if (api.onSearchText) api.onSearchText(function (txt) { if (!lockEl.hidden || !txt) return; newTab(searchUrl(txt)); });
   if (window.padlock && window.padlock.onOpenUrl) window.padlock.onOpenUrl(function (u) { if (!lockEl.hidden) return; newTab(u); });
 
   /* ---------- window controls (custom title bar) ---------- */

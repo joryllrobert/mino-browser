@@ -1,10 +1,10 @@
 {
   "name": "mino-browser",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A simple Chrome-style web browser with bookmarks that opens behind a password.",
   "main": "src/main.js",
   "author": "Mino Browser <joryllrobert@me.org>",
-  "homepage": "https://me.org",
+  "homepage": "https://balaymindanaw.org",
   "license": "MIT",
   "scripts": {
     "start": "electron .",

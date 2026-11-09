@@ -1,7 +1,7 @@
 # Mino Browser
 
-A simple vibe-coded Chrome-style desktop browser: tabs, address bar, back/forward/reload,
-bookmarks (star + bookmarks bar), and a password screen every time it opens. I made this for my own use.
+A simple Chrome-style desktop browser: tabs, address bar, back/forward/reload,
+bookmarks (star + bookmarks bar), and a password screen every time it opens.
 
 ## Build the Linux package
 
@@ -20,7 +20,8 @@ If the AppImage will not start on Ubuntu 23.10+ because of the user-namespace
 sandbox rule, run it with `--no-sandbox`, or install the .deb instead.
 
 ## Shortcuts
-Ctrl+T new tab, Ctrl+W close tab, Ctrl+L address bar, Ctrl+D bookmark, Ctrl+R reload, Ctrl+Shift+K lock. The window uses its own title bar (tabs, minimize, maximize, close); drag the empty space beside the tabs to move it.
+Ctrl+T new tab, Ctrl+W close tab, Ctrl+L address bar, Ctrl+D bookmark, Ctrl+R reload, Ctrl+J downloads, Ctrl+Shift+K lock.
+The shortcuts also work while a web page has focus. The window uses its own title bar (tabs, minimize, maximize, close); drag the empty space beside the tabs to move it.
 
 ## About the password
 It is a screen lock for the app window. The password is stored as a salted hash in the
@@ -79,3 +80,14 @@ Notes:
 - In the menu, the user agent entry named "Default (Chrome on Linux)" will actually send your
   Windows system's details. It is only a label.
 - Settings are stored in `%APPDATA%\mino-browser`.
+
+## Downloads
+Files are saved to your Downloads folder (name clashes get " (1)", " (2)"...). Ctrl+J, the
+download button in the toolbar, or Menu > Downloads opens the list: open the file, show it in
+its folder, pause, resume, cancel or remove it. The list is remembered between launches.
+"Save image as…" and "Save link as…" ask where to save.
+
+## Right-click menu on web pages
+Links: open in new tab, copy address, save link as. Images: open in new tab, save as, copy,
+copy address. Selected text: copy and search with your search engine. Text fields: undo, redo,
+cut, copy, paste, select all. Elsewhere: back, forward, reload, copy page address, and Inspect.

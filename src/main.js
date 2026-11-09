@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, session, screen } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, session, screen, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -90,6 +90,19 @@ function createWindow() {
       if (/^https?:/i.test(url)) win.webContents.send("open-url", url);
       return { action: "deny" };
     });
+    hookSession(wc.session);
+    wc.on("context-menu", (_ev, params) => showPageMenu(wc, params));
+    // Keystrokes inside a web page never reach the app's own page, so catch shortcuts here.
+    wc.on("before-input-event", (ev, input) => {
+      if (input.type !== "keyDown" || !(input.control || input.meta) || input.alt) return;
+      const k = String(input.key).toLowerCase();
+      const name = input.shift ? (k === "k" ? "lock" : null)
+        : { t: "newtab", w: "closetab", l: "focusurl", d: "bookmark", r: "reload", j: "downloads" }[k];
+      if (!name) return;
+      ev.preventDefault();
+      win.webContents.focus();
+      win.webContents.send("shortcut", name);
+    });
   });
   // Never let the app shell itself navigate away.
   win.webContents.on("will-navigate", (e) => e.preventDefault());
@@ -158,6 +171,151 @@ ipcMain.handle("wipe-partition", async (_e, part) => {
   return true;
 });
 
-app.whenReady().then(() => { loadConf(); createWindow(); watch(); });
+/* ---- right-click menu for web pages ---- */
+let navState = { back: false, fwd: false };
+ipcMain.on("nav-state", (_e, back, fwd) => { navState = { back: !!back, fwd: !!fwd }; });
+const isWeb = (u) => /^https?:\/\//i.test(u || "");
+function showPageMenu(wc, p) {
+  if (!win || win.isDestroyed()) return;
+  const send = (ch, ...a) => win.webContents.send(ch, ...a);
+  const sel = (p.selectionText || "").trim();
+  const t = [];
+  const sep = () => { if (t.length && t[t.length - 1].type !== "separator") t.push({ type: "separator" }); };
+
+  if (p.linkURL) {
+    if (isWeb(p.linkURL)) t.push({ label: "Open link in new tab", click: () => send("open-url", p.linkURL) });
+    t.push({ label: "Copy link address", click: () => clipboard.writeText(p.linkURL) });
+    if (isWeb(p.linkURL)) t.push({ label: "Save link as…", click: () => { saveAsPending.add(p.linkURL); wc.downloadURL(p.linkURL); } });
+  }
+  if (p.mediaType === "image" && p.srcURL) {
+    sep();
+    if (isWeb(p.srcURL)) t.push({ label: "Open image in new tab", click: () => send("open-url", p.srcURL) });
+    t.push({ label: "Save image as…", click: () => { saveAsPending.add(p.srcURL); wc.downloadURL(p.srcURL); } });
+    t.push({ label: "Copy image", click: () => wc.copyImageAt(p.x, p.y) });
+    if (isWeb(p.srcURL)) t.push({ label: "Copy image address", click: () => clipboard.writeText(p.srcURL) });
+  }
+  if ((p.mediaType === "video" || p.mediaType === "audio") && isWeb(p.srcURL)) {
+    sep();
+    t.push({ label: "Save " + p.mediaType + " as…", click: () => { saveAsPending.add(p.srcURL); wc.downloadURL(p.srcURL); } });
+    t.push({ label: "Copy " + p.mediaType + " address", click: () => clipboard.writeText(p.srcURL) });
+  }
+  if (p.isEditable) {
+    sep();
+    const f = p.editFlags || {};
+    t.push({ role: "undo", enabled: !!f.canUndo }, { role: "redo", enabled: !!f.canRedo }, { type: "separator" },
+      { role: "cut", enabled: !!f.canCut }, { role: "copy", enabled: !!f.canCopy }, { role: "paste", enabled: !!f.canPaste },
+      { role: "selectAll", enabled: !!f.canSelectAll });
+  } else if (sel) {
+    sep();
+    t.push({ role: "copy" });
+    const short = sel.length > 28 ? sel.slice(0, 28) + "…" : sel;
+    t.push({ label: "Search for “" + short.replace(/\s+/g, " ") + "”", click: () => send("search-text", sel) });
+  }
+  if (!p.linkURL && !(p.mediaType === "image" && p.srcURL) && !p.isEditable && !sel) {
+    t.push({ label: "Back", enabled: navState.back, click: () => send("nav", "back") },
+      { label: "Forward", enabled: navState.fwd, click: () => send("nav", "fwd") },
+      { label: "Reload", click: () => send("nav", "reload") });
+    if (isWeb(p.pageURL)) { sep(); t.push({ label: "Copy page address", click: () => clipboard.writeText(p.pageURL) }); }
+  }
+  sep();
+  t.push({ label: "Inspect", click: () => wc.inspectElement(p.x, p.y) });
+  Menu.buildFromTemplate(t).popup({ window: win });
+}
+
+/* ---- downloads ---- */
+const saveAsPending = new Set();
+const downloads = new Map();
+const hooked = new WeakSet();
+let dlSeq = 0, dlTimer = null;
+const dirty = new Set();
+const dlFile = () => path.join(app.getPath("userData"), "downloads.json");
+
+function pub(d) {
+  return { id: d.id, name: d.name, url: d.url, path: d.path, received: d.received, total: d.total, state: d.state,
+    paused: !!d.paused, resumable: !!(d.item && d.state === "interrupted" && d.item.canResume()), time: d.time,
+    exists: d.state === "completed" ? fs.existsSync(d.path) : true };
+}
+function flush() {
+  clearTimeout(dlTimer); dlTimer = null;
+  const out = [...dirty].map((id) => downloads.get(id)).filter(Boolean).map(pub);
+  const gone = [...dirty].filter((id) => !downloads.has(id)).map((id) => ({ id, removed: true }));
+  dirty.clear();
+  if (win && !win.isDestroyed() && (out.length || gone.length)) win.webContents.send("dl-update", out.concat(gone));
+}
+function touch(d, now) {
+  dirty.add(d.id);
+  if (now) flush(); else if (!dlTimer) dlTimer = setTimeout(flush, 250);
+}
+function saveDownloads() {
+  const done = [...downloads.values()].filter((d) => d.state !== "progressing" && d.state !== "interrupted")
+    .sort((a, b) => b.time - a.time).slice(0, 100)
+    .map((d) => ({ id: d.id, name: d.name, url: d.url, path: d.path, received: d.received, total: d.total, state: d.state, time: d.time }));
+  try { fs.writeFileSync(dlFile(), JSON.stringify(done)); } catch (e) {}
+}
+function loadDownloads() {
+  try {
+    JSON.parse(fs.readFileSync(dlFile(), "utf8")).forEach((d) => {
+      if (d && typeof d.id === "string" && typeof d.path === "string") downloads.set(d.id, Object.assign(d, { item: null, paused: false }));
+    });
+  } catch (e) {}
+}
+function uniquePath(dir, name) {
+  const ext = path.extname(name), base = path.basename(name, ext);
+  let p = path.join(dir, name), i = 0;
+  while (fs.existsSync(p)) p = path.join(dir, base + " (" + (++i) + ")" + ext);
+  return p;
+}
+function hookSession(ses) {
+  if (hooked.has(ses)) return;
+  hooked.add(ses);
+  ses.on("will-download", (_e, item) => {
+    const url = item.getURL();
+    const askWhere = saveAsPending.delete(url);
+    const name = path.basename(item.getFilename() || "download") || "download";
+    const d = { id: Date.now() + "-" + (++dlSeq), name, url, path: "", received: 0, total: item.getTotalBytes(), state: "progressing", paused: false, time: Date.now(), item };
+    if (!askWhere) {
+      const dir = app.getPath("downloads");
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
+      d.path = uniquePath(dir, name);
+      item.setSavePath(d.path);
+    }
+    downloads.set(d.id, d);
+    touch(d, true);
+    item.on("updated", (_ev, state) => {
+      d.received = item.getReceivedBytes(); d.total = item.getTotalBytes(); d.paused = item.isPaused();
+      d.state = state === "interrupted" ? "interrupted" : "progressing";
+      if (!d.path && item.getSavePath()) { d.path = item.getSavePath(); d.name = path.basename(d.path); }
+      touch(d);
+    });
+    item.once("done", (_ev, state) => {
+      d.received = item.getReceivedBytes(); d.total = item.getTotalBytes() || d.received;
+      d.path = item.getSavePath() || d.path; if (d.path) d.name = path.basename(d.path);
+      d.state = state; d.paused = false; d.item = null;
+      if (askWhere && state === "cancelled" && d.received === 0) { downloads.delete(d.id); touch(d, true); return; }
+      touch(d, true); saveDownloads();
+    });
+  });
+}
+ipcMain.handle("dl-list", () => [...downloads.values()].sort((a, b) => b.time - a.time).map(pub));
+ipcMain.on("dl-act", (_e, id, action) => {
+  if (action === "folder-all") { shell.openPath(app.getPath("downloads")); return; }
+  if (action === "clear") {
+    [...downloads.values()].forEach((d) => { if (!d.item) { downloads.delete(d.id); dirty.add(d.id); } });
+    flush(); saveDownloads(); return;
+  }
+  const d = downloads.get(id);
+  if (!d) return;
+  if (action === "open" && d.state === "completed" && d.path) shell.openPath(d.path);
+  else if (action === "show" && d.path) shell.showItemInFolder(d.path);
+  else if (action === "pause" && d.item) { d.item.pause(); d.paused = true; touch(d, true); }
+  else if (action === "resume" && d.item) { d.item.resume(); d.paused = false; touch(d, true); }
+  else if (action === "cancel" && d.item) d.item.cancel();
+  else if (action === "remove") {
+    if (d.item) d.item.cancel();
+    downloads.delete(d.id); dirty.add(d.id); flush(); saveDownloads();
+  }
+});
+
+app.whenReady().then(() => { loadConf(); loadDownloads(); createWindow(); watch(); });
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.on("window-all-closed", () => app.quit());
